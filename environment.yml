@@ -1,0 +1,13 @@
+name: fastqc-pipeline
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python >=3.9
+  - fastqc
+  - multiqc
+  - fastp
+  - pip
+  - pip:
+      - ""  # add extra Python packages here if needed

@@ -1,0 +1,45 @@
+# Raw and intermediate sequencing data
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.bam
+*.sam
+*.cram
+
+# QC outputs and large result directories
+results/
+output/
+*/fastqc/
+*/multiqc/
+*/qc_json/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.sqlite3
+.env
+.venv/
+venv/
+.env*/
+
+# Conda
+.envs/
+.conda/
+*.conda
+
+# Logs
+*.log
+logs/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# IDE/editors
+.vscode/
+.idea/
+*.swp
+*.swo
