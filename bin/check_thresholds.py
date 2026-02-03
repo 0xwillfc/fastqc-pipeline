@@ -2,7 +2,6 @@
 import argparse
 import configparser
 import json
-import os
 import zipfile
 from pathlib import Path
 
@@ -18,17 +17,32 @@ def parse_args():
 
 
 def load_thresholds(config_path: str) -> dict:
+    """
+    Load thresholds from INI config file.
+
+    Behavior:
+    - Raises FileNotFoundError if config file does not exist (required by unit tests).
+    - Raises ValueError if [thresholds] section is missing.
+    - Returns defaults via fallback for missing keys.
+    """
+    config_path = str(config_path)
+    if not Path(config_path).exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
     cfg = configparser.ConfigParser()
     cfg.read(config_path)
-    th = {}
-    if "thresholds" in cfg:
-        sec = cfg["thresholds"]
-        th["min_reads"] = sec.getint("min_reads", fallback=10000)
-        th["min_pct_q30"] = sec.getfloat("min_pct_q30", fallback=80.0)
-        th["max_adapter_content"] = sec.getfloat("max_adapter_content", fallback=5.0)
-        th["min_gc"] = sec.getfloat("min_gc", fallback=30.0)
-        th["max_gc"] = sec.getfloat("max_gc", fallback=70.0)
-    return th
+
+    if "thresholds" not in cfg:
+        raise ValueError("Missing [thresholds] section in config file")
+
+    sec = cfg["thresholds"]
+    return {
+        "min_reads": sec.getint("min_reads", fallback=10000),
+        "min_pct_q30": sec.getfloat("min_pct_q30", fallback=80.0),
+        "max_adapter_content": sec.getfloat("max_adapter_content", fallback=5.0),
+        "min_gc": sec.getfloat("min_gc", fallback=30.0),
+        "max_gc": sec.getfloat("max_gc", fallback=70.0),
+    }
 
 
 def parse_fastqc_zip(zip_path: Path) -> dict:
@@ -45,21 +59,24 @@ def parse_fastqc_zip(zip_path: Path) -> dict:
     }
 
     with zipfile.ZipFile(zip_path, "r") as zf:
-        # fastqc_data.txt holds main stats
         data_files = [name for name in zf.namelist() if name.endswith("fastqc_data.txt")]
         if not data_files:
             return metrics
+
+        # Parse main stats
         with zf.open(data_files[0]) as fh:
             for raw_line in fh:
                 line = raw_line.decode("utf-8", errors="ignore").strip()
                 if line.startswith("Total Sequences"):
-                    metrics["total_sequences"] = int(line.split("\t")[1])
+                    parts = line.split("\t")
+                    if len(parts) > 1:
+                        metrics["total_sequences"] = int(parts[1])
                 elif line.startswith("%GC"):
-                    metrics["gc_content"] = float(line.split("\t")[1])
-                # FastQC doesn't directly give %Q30; in a real pipeline you might
-                # approximate it from per-base quality. Here we'll leave as None.
+                    parts = line.split("\t")
+                    if len(parts) > 1:
+                        metrics["gc_content"] = float(parts[1])
 
-        # Adapter content from fastqc_data.txt "Adapter Content" section
+        # Parse adapter content section
         with zf.open(data_files[0]) as fh:
             in_adapter_section = False
             max_adapter = 0.0
@@ -74,7 +91,6 @@ def parse_fastqc_zip(zip_path: Path) -> dict:
                     if line.startswith("#") or not line:
                         continue
                     parts = line.split("\t")
-                    # columns: base, adapter1, adapter2, ...
                     for val in parts[1:]:
                         try:
                             max_adapter = max(max_adapter, float(val))
@@ -89,27 +105,27 @@ def check_sample(metrics: dict, thresholds: dict) -> dict:
     reasons = []
 
     total = metrics.get("total_sequences")
-    if total is not None and thresholds.get("min_reads") is not None:
-        if total < thresholds["min_reads"]:
-            reasons.append(f"total_sequences ({total}) < min_reads ({thresholds['min_reads']})")
+    min_reads = thresholds.get("min_reads")
+    if total is not None and min_reads is not None:
+        if int(total) < int(min_reads):
+            reasons.append(f"total_sequences ({total}) < min_reads ({min_reads})")
 
     gc = metrics.get("gc_content")
     if gc is not None:
         min_gc = thresholds.get("min_gc")
         max_gc = thresholds.get("max_gc")
-        if min_gc is not None and gc < min_gc:
+        if min_gc is not None and float(gc) < float(min_gc):
             reasons.append(f"GC% ({gc}) < min_gc ({min_gc})")
-        if max_gc is not None and gc > max_gc:
+        if max_gc is not None and float(gc) > float(max_gc):
             reasons.append(f"GC% ({gc}) > max_gc ({max_gc})")
 
     adapter = metrics.get("adapter_content_max")
-    if adapter is not None and thresholds.get("max_adapter_content") is not None:
-        if adapter > thresholds["max_adapter_content"]:
+    max_adapter_content = thresholds.get("max_adapter_content")
+    if adapter is not None and max_adapter_content is not None:
+        if float(adapter) > float(max_adapter_content):
             reasons.append(
-                f"adapter_content_max ({adapter}) > max_adapter_content ({thresholds['max_adapter_content']})"
+                f"adapter_content_max ({adapter}) > max_adapter_content ({max_adapter_content})"
             )
-
-    # pct_q30 left as None; you could compute it separately if needed.
 
     status = "PASS" if not reasons else "FAIL"
     return {
@@ -117,6 +133,17 @@ def check_sample(metrics: dict, thresholds: dict) -> dict:
         "status": status,
         "reasons": reasons,
     }
+
+
+def validate_metrics(metrics: dict, thresholds: dict, sample_name: str):
+    """
+    Backwards-compatible public API expected by unit tests.
+
+    Returns:
+        (status, reasons)
+    """
+    enriched = check_sample({**metrics, "sample": sample_name}, thresholds)
+    return enriched["status"], enriched["reasons"]
 
 
 def main():
@@ -139,7 +166,7 @@ def main():
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w") as f:
+    with out_path.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
 
