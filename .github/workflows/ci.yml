@@ -2,14 +2,18 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
   pull_request:
 
 jobs:
   lint-and-dry-run:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Conda
         uses: conda-incubator/setup-miniconda@v3
@@ -18,23 +22,25 @@ jobs:
           environment-file: environment.yml
           auto-activate-base: false
 
-      - name: Show versions
+      - name: Show tool versions
         shell: bash -l {0}
         run: |
+          echo "Checking installed tools"
+          python --version
           fastqc --version || echo "FastQC not found"
           multiqc --version || echo "MultiQC not found"
-          python --version
 
       - name: Dry-run on example data (if present)
         shell: bash -l {0}
         run: |
           if [ -d "tests/test_data" ] && compgen -G "tests/test_data/*.fastq*" > /dev/null; then
-            bash bin/run_qc.sh -i tests/test_data -o tests/results -t 2 || exit 1
+            echo "Running dry-run QC pipeline"
+            bash bin/run_qc.sh -i tests/test_data -o tests/results -t 2
           else
-            echo "No test FASTQ files found in tests/test_data/. Skipping dry-run."
-
-              - name: Run unit tests
-                    shell: bash -l {0}
-                          run: |
-                                  python -m pytest tests/ -v --tb=short || echo "Tests completed with status: $?"
+            echo "No FASTQ files found in tests/test_data. Skipping dry-run."
           fi
+
+      - name: Run unit tests
+        shell: bash -l {0}
+        run: |
+          python -m pytest tests/ -v --tb=short
