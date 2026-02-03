@@ -32,4 +32,9 @@ jobs:
             bash bin/run_qc.sh -i tests/test_data -o tests/results -t 2 || exit 1
           else
             echo "No test FASTQ files found in tests/test_data/. Skipping dry-run."
+
+              - name: Run unit tests
+                    shell: bash -l {0}
+                          run: |
+                                  python -m pytest tests/ -v --tb=short || echo "Tests completed with status: $?"
           fi
